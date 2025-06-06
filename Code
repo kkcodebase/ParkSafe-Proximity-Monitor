@@ -1,0 +1,145 @@
+#include <stdio.h>
+#include <LPC17xx.h> // Include the LPC17xx header file for LPC1768 microcontroller
+#include <string.h>  // Include the string header file for string operations
+
+// Defining Constants
+#define LED_Pinsel 0xff  // Define LED_Pinsel as 0xff for pins P0.4 to P0.11 (LEDs)
+#define TRIGGER_PIN (1 << 15)  // Define TRIGGER_PIN as (1 << 15) for pin P0.15 (Trigger Pin)
+#define ECHO_PIN (1 << 16)     // Define ECHO_PIN as (1 << 16) for pin P0.16 (Echo Pin)
+
+// Variable Declarations
+char ans[20] = "";  // Declare an array to store the output message
+int temp, temp1, temp2 = 0;  // Declare integer variables to store temporary values
+int flag = 0, flag_command=0;  // Declare flags for control purposes
+int i, j, k, l, r, echoTime = 5000;  // Declare integer variables for iteration and echo time measurement
+float distance = 0;  // Declare a floating-point variable to store the calculated distance
+
+//Function Declarations
+void lcd_wr(void);  // Declare a function to write data to the LCD
+void port_wr(void);  // Declare a function to write data to ports
+void delay(int r1);  // Declare a function to introduce delay
+void timer_start(void);  // Declare a function to start a timer
+float timer_stop();  // Declare a function to stop a timer and return elapsed time
+void timer_init(void);  // Declare a function to initialize a timer
+void dealy_in_US(unsigned int microseconds);  // Declare a function to introduce microsecond delay
+void dealy_in_MS(unsigned int milliseconds);  // Declare a function to introduce millisecond delay
+
+//Functions
+
+void dealy_in_US(unsigned int microseconds) {
+    LPC_TIM0->TCR = 0x02; // Reset Timer
+    LPC_TIM0->PR = 0; // Set prescaler to 0
+    LPC_TIM0->MR0 = microseconds - 1; // Set match register for microseconds
+    LPC_TIM0->MCR = 0x01; // Interrupt on match
+    LPC_TIM0->TCR = 0x01; // Enable timer
+    while ((LPC_TIM0->IR & 0x01) == 0); // Wait for interrupt flag
+    LPC_TIM0->TCR = 0x00; // Stop the timer
+    LPC_TIM0->IR = 0x01; // Clear the interrupt flag
+}
+
+void dealy_in_MS(unsigned int milliseconds) {
+    dealy_in_US(milliseconds * 1000);  // Convert milliseconds to microseconds and call dealy_in_US
+}
+
+void timer_init(void) {
+    LPC_TIM0->CTCR = 0x0; // Timer mode
+    LPC_TIM0->PR = 11999999; // Set prescaler for 12MHz
+    LPC_TIM0->TCR = 0x02; // Reset Timer
+}
+
+void timer_start(void) {
+    LPC_TIM0->TCR = 0x02; // Reset Timer
+    LPC_TIM0->TCR = 0x01; // Enable timer
+}
+
+float timer_stop() {
+    LPC_TIM0->TCR = 0x0; // Disable timer
+    return LPC_TIM0->TC; // Return elapsed time
+}
+
+void delay(int r1) {
+    for (r = 0; r < r1; r++); // Loop to introduce delay
+}
+
+void port_wr() {
+    int j;
+    LPC_GPIO0->FIOPIN = temp2 << 23; // Set port pins based on temp2 value
+    if (flag_command == 0) {
+        LPC_GPIO0->FIOCLR = 1 << 27; // Clear port pin 27
+    } else {
+        LPC_GPIO0->FIOSET = 1 << 27; // Set port pin 27
+    }
+    LPC_GPIO0->FIOSET = 1 << 28; // Set port pin 28
+    for (j = 0; j < 50; j++); // Delay
+    LPC_GPIO0->FIOCLR = 1 << 28; // Clear port pin 28
+    for (j = 0; j < 10000; j++); // Delay
+}
+
+void lcd_wr() {
+    temp2 = (temp1 >> 4) & 0xF; // Extract higher 4 bits of temp1
+    port_wr();  // Call port_wr
+    temp2 = temp1 & 0xF; // Extract lower 4 bits of temp1
+    port_wr();  // Call port_wr
+}
+
+// Main Program
+int main() {
+    int ledflag = 0;
+    int command_init[] = {3, 3, 3, 2, 2, 0x01, 0x06, 0x0C, 0x80};  // Initialize LCD
+    SystemInit();  // Initialize system
+    SystemCoreClockUpdate();  // Update system clock
+    timer_init();  // Initialize timer
+    LPC_PINCON->PINSEL0 &= 0xfffff00f; // Interface LEDs P0.4-P0.11
+    LPC_PINCON->PINSEL0 &= 0x3fffffff; // Interface TRIG P0.15
+    LPC_PINCON->PINSEL1 &= 0xfffffff0; // Interface ECHO P0.16
+    LPC_GPIO0->FIODIR |= TRIGGER_PIN | 1 << 17; // Direction for TRIGGER pin and Buzzer
+    LPC_GPIO1->FIODIR |= 0 << 16; // Direction for ECHO PIN
+    LPC_GPIO0->FIODIR |= LED_Pinsel << 4; // Direction for LED
+    LPC_PINCON->PINSEL1 |= 0;  // Interface LCD
+    LPC_GPIO0->FIODIR |= 0XF << 23 | 1 << 27 | 1 << 28; // Direction For LCDs
+    flag_command = 0;  // Initialize flag_command
+    for (i = 0; i < 9; i++) {  // Loop for LCD initialization
+        temp1 = command_init[i];  // Set temp1 to current command
+        lcd_wr();  // Call lcd_wr
+        for (j = 0; j < 30000; j++);  // Delay
+    }
+    i = 0;  // Initialize i
+    flag = 1;  // Initialize flag
+    LPC_GPIO0->FIOCLR |= TRIGGER_PIN;  // Clear TRIGGER_PIN
+    while (1) {
+        LPC_GPIO0->FIOSET = 0x00000800;  // Output 10us HIGH on the TRIGGER pin
+        LPC_GPIO0->FIOMASK = 0xFFFF7FFF;  // Set FIOMASK to mask unused pins
+        LPC_GPIO0->FIOPIN |= TRIGGER_PIN;  // Set TRIGGER_PIN
+        dealy_in_US(10);  // Introduce 10us delay
+        LPC_GPIO0->FIOCLR |= TRIGGER_PIN;  // Clear TRIGGER_PIN
+        LPC_GPIO0->FIOMASK = 0x0;  // Reset FIOMASK
+        while (!(LPC_GPIO0->FIOPIN & ECHO_PIN)) { 
+            // Wait till ECHO PIN becomes high
+        }
+        timer_start();  // Start timer
+        while (LPC_GPIO0->FIOPIN & ECHO_PIN);  // Wait till ECHO PIN becomes low
+        echoTime = timer_stop();  // Stop timer and store elapsed time
+        distance = (0.00343 * echoTime) / 2;  // Calculate distance in cm
+        sprintf(ans, " Distance: %.3f", distance);  // Format distance into string
+        flag_command = 1;  // Set flag_command to 1
+        i = 0;  // Reset i
+        flag_command = 0;  // Reset flag_command
+        temp1 = 0x01;  // Set temp1 to 0x01
+        lcd_wr();  // Call lcd_wr
+        flag_command = 1;  // Set flag_command to 1
+        while (ans[i] != '\0') {  // Loop until end of string
+            temp1 = ans[i];  // Set temp1 to current character
+            lcd_wr();  // Call lcd_wr
+            for (j = 0; j < 30000; j++);  // Delay
+            i++;  // Increment i
+        }
+        if (distance < 20) {  // If distance is less than 20 cm
+            LPC_GPIO0->FIOSET = LED_Pinsel << 4;  // Set LED pins
+            LPC_GPIO0->FIOSET = 1 << 17;  // Set Buzzer pin
+        } else {  // If distance is greater than or equal to 20 cm
+            LPC_GPIO0->FIOCLR = LED_Pinsel << 4;  // Clear LED pins
+            LPC_GPIO0->FIOCLR = 1 << 17;  // Clear Buzzer pin
+        }
+        delay(88000);  // Introduce delay
+    }
+}
